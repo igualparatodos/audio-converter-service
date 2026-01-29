@@ -1,0 +1,24 @@
+name: CI (Kubernetes)
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  production:
+    name: CI Pipeline - Production
+    uses: igualparatodos/ci-workflows/.github/workflows/ci-kubernetes.yaml@main
+    permissions:
+      contents: write
+      issues: write
+      id-token: write
+    with:
+      app_name: production-${{ github.event.repository.name }}
+      namespace: ${{ github.event.repository.name }}
+      aws_account_id: "992382838579"
+      aws_region: "sa-east-1"
+      eks_cluster: "https://kubernetes.default.svc"
+      argocd_project: "production"
+      argocd_server_url: "argocd.igual.cloud"
+    secrets: inherit
