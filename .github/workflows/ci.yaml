@@ -6,20 +6,115 @@ on:
     branches:
       - main
 
+env:
+  APP_NAME: production-audio-converter
+  AWS_ACCOUNT_ID: "992382838579"
+  AWS_REGION: "sa-east-1"
+  ARGOCD_SERVER_URL: "argocd.igual.cloud"
+
 jobs:
-  production:
-    name: CI Pipeline - Production
-    uses: igualparatodos/ci-workflows/.github/workflows/ci-kubernetes.yaml@main
+  build:
+    name: Build and Push to ECR
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
-      issues: write
+      contents: read
       id-token: write
-    with:
-      app_name: production-${{ github.event.repository.name }}
-      namespace: ${{ github.event.repository.name }}
-      aws_account_id: "992382838579"
-      aws_region: "sa-east-1"
-      eks_cluster: "https://kubernetes.default.svc"
-      argocd_project: "production"
-      argocd_server_url: "argocd.igual.cloud"
-    secrets: inherit
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}:latest
+            ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to ArgoCD
+    needs: [build]
+    runs-on: ubuntu-latest
+    env:
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+    steps:
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/download/v2.6.15/argocd-linux-amd64
+          sudo install -m 755 /tmp/argocd /usr/local/bin/argocd
+          argocd version --client
+
+      - name: Update Image Tag in ArgoCD
+        run: |
+          argocd app set ${{ env.APP_NAME }} \
+            --server ${{ env.ARGOCD_SERVER_URL }} \
+            --parameter igual-application-chart.image.tag=${{ github.sha }} \
+            --grpc-web
+
+          echo "Waiting for ArgoCD to complete parameter update..."
+          argocd app wait ${{ env.APP_NAME }} \
+            --server ${{ env.ARGOCD_SERVER_URL }} \
+            --operation \
+            --timeout 60 \
+            --grpc-web || echo "No operation in progress or wait timed out"
+
+      - name: Sync ArgoCD Application
+        run: |
+          argocd app get ${{ env.APP_NAME }} \
+            --server ${{ env.ARGOCD_SERVER_URL }} \
+            --refresh \
+            --grpc-web
+
+          argocd app sync ${{ env.APP_NAME }} \
+            --server ${{ env.ARGOCD_SERVER_URL }} \
+            --force \
+            --prune \
+            --retry-limit 3 \
+            --grpc-web \
+            --async || echo "Sync triggered or already in progress"
+
+      - name: Wait for Sync
+        run: |
+          echo "Waiting for application to sync..."
+          for i in {1..60}; do
+            APP_STATUS=$(argocd app get ${{ env.APP_NAME }} \
+              --server ${{ env.ARGOCD_SERVER_URL }} \
+              --grpc-web \
+              --output json 2>/dev/null || echo "{}")
+
+            SYNC_STATUS=$(echo "$APP_STATUS" | jq -r '.status.sync.status // "Unknown"')
+            HEALTH_STATUS=$(echo "$APP_STATUS" | jq -r '.status.health.status // "Unknown"')
+
+            echo "[$i/60] Sync: $SYNC_STATUS | Health: $HEALTH_STATUS"
+
+            if [ "$SYNC_STATUS" = "Synced" ] && [ "$HEALTH_STATUS" = "Healthy" ]; then
+              echo "✅ Application is synced and healthy!"
+              exit 0
+            fi
+
+            if [ "$HEALTH_STATUS" = "Degraded" ]; then
+              echo "❌ Application is degraded!"
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          echo "⏱️ Timeout waiting for sync"
+          exit 1
