@@ -53,7 +53,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     env:
-      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhcmdvY2QiLCJzdWIiOiJjaS1ib3Q6YXBpS2V5IiwiZXhwIjoxNzk0NTcwOTM1LCJuYmYiOjE3NjMwMzQ5MzUsImlhdCI6MTc2MzAzNDkzNSwianRpIjoiY2ktYm90LWNpIn0.kKrRtB5cgbLtp6aKFVKL9y_HSX8hUfIpXlJHlc_nIoY' }}
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhcmdvY2QiLCJzdWIiOiJjaS1ib3Q6YXBpS2V5IiwiZXhwIjoxNzk0NTcwOTM1LCJuYmYiOjE3NjMwMzQ5MzUsImlhdCI6MTc2MzAzNDkzNSwianRpIjoiY2ktYm90LWNpIn0.kKrRtB5cgbLtp6aKFVKL9y_HSX8hUfIp_lJHlc_nIoY' }}
     steps:
       - name: Install ArgoCD CLI
         run: |
